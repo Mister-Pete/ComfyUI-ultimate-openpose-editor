@@ -50,19 +50,105 @@ class OpenposeEditorDialog extends ComfyDialog {
         this.is_layout_created = false;
 
         window.addEventListener("message", (event) => {
-            if (event.source !== this.iframeElement.contentWindow) {
+            if (!this.iframeElement || event.source !== this.iframeElement.contentWindow) {
                 return;
             }
 
             const message = event.data;
             if (message.modalId === 0) {
                 const targetNode = ComfyApp.clipspace_return_node;
-                const textAreaElement = targetNode.widgets[14].element;
-                textAreaElement.value = JSON.stringify(event.data.poses);
-		ComfyApp.onClipspaceEditorClosed();
+                const poseWidget = this.findPoseJSONWidget(targetNode);
+                const poseValue = JSON.stringify(event.data.poses);
+
+                if (poseWidget?.element) {
+                    poseWidget.element.value = poseValue;
+                }
+                if (poseWidget) {
+                    poseWidget.value = poseValue;
+                    if (typeof poseWidget.callback === "function") {
+                        poseWidget.callback(poseValue, app.canvas, targetNode);
+                    }
+                }
+
+                if (typeof ComfyApp.onClipspaceEditorClosed === "function") {
+                    ComfyApp.onClipspaceEditorClosed();
+                }
                 this.close();
             }
         });
+    }
+
+    findPoseJSONWidget(targetNode) {
+        const widgets = targetNode?.widgets || [];
+
+        const byName = widgets.find((widget) =>
+            typeof widget?.name === "string" &&
+            /pose_json/i.test(widget.name) &&
+            widget.element
+        );
+        if (byName) {
+            return byName;
+        }
+
+        const byTextarea = widgets.find((widget) => {
+            const tagName = widget?.element?.tagName;
+            return tagName === "TEXTAREA";
+        });
+        if (byTextarea) {
+            return byTextarea;
+        }
+
+        return widgets.find((widget) => widget?.element && typeof widget?.value === "string") || null;
+    }
+
+    getResolutionX(targetNode) {
+        const widgets = targetNode?.widgets || [];
+        const byName = widgets.find((widget) =>
+            typeof widget?.name === "string" &&
+            /resolution_x/i.test(widget.name)
+        );
+
+        const rawValue = byName?.value;
+        const parsed = Number(rawValue);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+
+        return 512;
+    }
+
+    buildDefaultPose(targetNode) {
+        let resolutionX = this.getResolutionX(targetNode);
+        let resolutionY = Math.floor(768 * (resolutionX / 512));
+
+        if (resolutionX < 64) {
+            resolutionX = 512;
+            resolutionY = 768;
+        }
+
+        return [{
+            people: [{
+                pose_keypoints_2d: [],
+                face_keypoints_2d: [],
+                hand_left_keypoints_2d: [],
+                hand_right_keypoints_2d: [],
+            }],
+            canvas_height: resolutionY,
+            canvas_width: resolutionX,
+        }];
+    }
+
+    parsePoseJSONString(jsonString, targetNode) {
+        if (!jsonString || typeof jsonString !== "string" || jsonString.trim() === "") {
+            return this.buildDefaultPose(targetNode);
+        }
+
+        try {
+            return JSON.parse(jsonString.replace(/'/g, '"'));
+        } catch (error) {
+            console.warn("[OpenposeEditor] Failed to parse POSE_JSON, using default pose.", error);
+            return this.buildDefaultPose(targetNode);
+        }
     }
 
     createButtons() {
@@ -88,27 +174,11 @@ class OpenposeEditorDialog extends ComfyDialog {
         }
 
         const targetNode = ComfyApp.clipspace_return_node;
-        if (targetNode.inputs?.[0].link || targetNode.inputs?.[targetNode.inputs.length-1].widget){
-            const textAreaElement = targetNode.widgets[15].element;
-            this.element.style.display = "flex";
-            this.setCanvasJSONString(textAreaElement.value.replace(/'/g, '"'));
-        } else {
-            const textAreaElement = targetNode.widgets[14].element;
-            this.element.style.display = "flex";
-            if (textAreaElement.value === "") {
-                let resolution_x = targetNode.widgets[3].value;
-                let resolution_y = Math.floor(768*(resolution_x*1.0/512));
-                if (resolution_x < 64){
-                    resolution_x = 512;
-                    resolution_y = 768;
-                }
+        const poseWidget = this.findPoseJSONWidget(targetNode);
+        const poseString = poseWidget?.element?.value ?? poseWidget?.value ?? "";
 
-                let pose = `[{"people": [{"pose_keypoints_2d": [], "face_keypoints_2d": [], "hand_left_keypoints_2d": [], "hand_right_keypoints_2d": []}], "canvas_height": ${resolution_y}, "canvas_width": ${resolution_x}}]`;
-                this.setCanvasJSONString(pose);
-            } else {
-                this.setCanvasJSONString(textAreaElement.value.replace(/'/g, '"'));
-            }
-        }
+        this.element.style.display = "flex";
+        this.setCanvasJSON(this.parsePoseJSONString(poseString, targetNode));
     }
 
     createLayout() {
@@ -148,10 +218,14 @@ class OpenposeEditorDialog extends ComfyDialog {
         });
     }
 
-    setCanvasJSONString(jsonString) {
+    setCanvasJSON(poses) {
+        if (!this.iframeElement?.contentWindow) {
+            return;
+        }
+
         this.iframeElement.contentWindow.postMessage({
             modalId: 0,
-            poses: JSON.parse(jsonString)
+            poses,
         }, "*");
     }
 }
