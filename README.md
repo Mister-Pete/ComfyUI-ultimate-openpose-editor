@@ -8,6 +8,8 @@
   <img src="assets/editor_example.jpg" />
 </p>
 
+[UPDATE] This is a fork of https://github.com/westNeighbor/ComfyUI-ultimate-openpose-editor with a couple small fixes. I was getting errors when trying to open the pose editor from the Openpose Editor Node, it would not open at all. With these tweaks (like not assuming some widget numbers) I was able to open and use it. The original documentation follows
+
 This is an improved version of [ComfyUI-openpose-editor](https://github.com/huchenlei/ComfyUI-openpose-editor) 
 in ComfyUI, enable input and output with flexible choices. Much more convenient and easier to use. It integrates the render function which you also can intall it separately from my [ultimate-openpose-render](https://github.com/westNeighbor/ComfyUI-ultimate-openpose-render) repo or search in the Custom Nodes Manager
 
